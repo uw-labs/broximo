@@ -18,7 +18,7 @@ func TestBadgerStore_TopicStore(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dbPath)
 
-	s, err := store.NewBadgerStore(dbPath, 0)
+	s, err := store.NewBadgerStore(dbPath, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 

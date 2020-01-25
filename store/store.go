@@ -14,12 +14,13 @@ type Store interface {
 }
 
 // NewBadgerStore returns a store instance backed by badger db.
-func NewBadgerStore(path string, maxCacheSize int64) (Store, error) {
+func NewBadgerStore(path string, maxCacheSize int64, logger badger.Logger) (Store, error) {
 	if maxCacheSize == 0 {
 		maxCacheSize = 1 << 30 // 1 GB = Badger default
 	}
 	db, err := badger.Open(
 		badger.DefaultOptions(path).
+			WithLogger(logger).
 			WithMaxCacheSize(maxCacheSize).
 			WithNumVersionsToKeep(1).
 			WithNumLevelZeroTables(1).

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -207,7 +206,6 @@ func (store badgerTopicStore) consumerKey(consumerID string) []byte {
 	copy(key, "s:")
 	copy(key[2:], store.topic)
 	copy(key[2+len(store.topic):], consumerID)
-	fmt.Println(string(key))
 
 	return key
 }

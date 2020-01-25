@@ -3,13 +3,16 @@ package backend
 import (
 	"context"
 
+	"github.com/sirupsen/logrus"
 	"github.com/uw-labs/broximo/store"
 	"github.com/uw-labs/substrate"
 	"github.com/uw-labs/sync/rungroup"
 )
 
 type badgerSink struct {
-	store store.TopicStore
+	topic  string
+	store  store.TopicStore
+	logger *logrus.Logger
 }
 
 func (sink *badgerSink) PublishMessages(ctx context.Context, acks chan<- substrate.Message, messages <-chan substrate.Message) error {
@@ -40,6 +43,8 @@ func (sink *badgerSink) PublishMessages(ctx context.Context, acks chan<- substra
 					// TODO: handle tx retries
 					return err
 				}
+				sink.logger.Debugf("Message written to topic %s: %s", sink.topic, string(msg.Data()))
+
 				if dMsg, ok := msg.(substrate.DiscardableMessage); ok {
 					dMsg.DiscardPayload()
 				}

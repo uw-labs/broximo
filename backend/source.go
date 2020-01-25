@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	"github.com/sirupsen/logrus"
 	"github.com/uw-labs/broximo/store"
 	"github.com/uw-labs/substrate"
 	"github.com/uw-labs/sync/rungroup"
@@ -10,9 +11,11 @@ import (
 
 type badgerSource struct {
 	consumerID    string
+	topic         string
 	initialOffset uint64
 	backend       *backend
 	store         store.TopicStore
+	logger        *logrus.Logger
 }
 
 func (source *badgerSource) ConsumeMessages(ctx context.Context, messages chan<- substrate.Message, acks <-chan substrate.Message) error {
@@ -37,7 +40,11 @@ func (source *badgerSource) writeMessages(ctx context.Context, messages chan<- s
 		case <-ctx.Done():
 			return nil
 		case messages <- &seqMessage{data: msg}:
-			return nil
+			source.logger.Debugf(
+				"Message %v on topic %s was sent to consumer %s.",
+				nextSeq, source.topic, source.consumerID,
+			)
+			nextSeq++
 		}
 	}
 }
@@ -62,6 +69,10 @@ func (source *badgerSource) processAcks(ctx context.Context, acks <-chan substra
 			if err := source.store.SetConsumerOffset(source.consumerID, expectedSeq); err != nil {
 				return err
 			}
+			source.logger.Debugf(
+				"Message %v on topic %s was acknowledged by consumer %s.",
+				expectedSeq, source.topic, source.consumerID,
+			)
 			expectedSeq++
 		}
 	}

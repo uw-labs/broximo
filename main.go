@@ -2,14 +2,16 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 	"github.com/uw-labs/broximo/backend"
 	"github.com/uw-labs/proximo"
@@ -18,12 +20,24 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+var logger *logrus.Logger
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "broximo"
 	app.Description = "Badger backed proximo server."
 
 	app.Flags = []cli.Flag{
+		&cli.StringFlag{
+			Name:    "log-level",
+			EnvVars: []string{"BROXIMO_LOG_LEVEL"},
+			Value:   "info",
+		},
+		&cli.StringFlag{
+			Name:    "log-formatter",
+			EnvVars: []string{"BROXIMO_LOG_FORMATTER"},
+			Value:   "text",
+		},
 		&cli.IntFlag{
 			Name:    "port",
 			EnvVars: []string{"BROXIMO_PORT"},
@@ -39,8 +53,12 @@ func main() {
 			EnvVars: []string{"BROXIMO_BADGER_MAX_CACHE_SIZE_MB"},
 		},
 	}
+	app.Before = func(c *cli.Context) error {
+		return setLogger(c)
+	}
 	app.Action = func(c *cli.Context) error {
 		b, err := backend.New(backend.Config{
+			Logger:             logger,
 			BadgerDBPath:       c.String("badger-dir"),
 			BadgerMaxCacheSize: c.Int64("badger-max-cache-size-mb"),
 		})
@@ -53,9 +71,9 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+		logrus.Fatal(err)
 	}
-	log.Println("Server terminated cleanly")
+	logger.Println("Server terminated cleanly")
 }
 
 func listenAndServe(backend proximo.AsyncSinkSourceFactory, port int) error {
@@ -81,10 +99,39 @@ func listenAndServe(backend proximo.AsyncSinkSourceFactory, port int) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	go func() { errCh <- grpcServer.Serve(lis) }()
+	logger.Infof("Server started on port %v", port)
+
 	select {
 	case err := <-errCh:
 		return errors.Wrap(err, "failed to serve grpc")
 	case <-sigCh:
 		return nil
 	}
+}
+
+func setLogger(c *cli.Context) error {
+	logger = logrus.New()
+	logLevel := strings.ToLower(c.String("log-level"))
+	if strings.ToLower(logLevel) == "off" {
+		logger.SetOutput(ioutil.Discard)
+		return nil
+	}
+	ll, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		return err
+	}
+	logger.SetLevel(ll)
+
+	var format logrus.Formatter
+	switch strings.ToLower(c.String("log-formatter")) {
+	case "json":
+		format = &logrus.JSONFormatter{}
+	case "text":
+		format = &logrus.TextFormatter{}
+	default:
+		return errors.Errorf("Unknown log formatter: %s", c.String("log-formatter"))
+	}
+	logger.SetFormatter(format)
+
+	return nil
 }

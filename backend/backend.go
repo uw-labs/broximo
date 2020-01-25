@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/uw-labs/broximo/store"
 	"github.com/uw-labs/proximo"
 	"github.com/uw-labs/proximo/proto"
@@ -22,18 +23,20 @@ type Backend interface {
 
 // Config is a configuration of the backend layer.
 type Config struct {
+	Logger             *logrus.Logger
 	BadgerDBPath       string
 	BadgerMaxCacheSize int64
 }
 
 // New creates new Backend instance from the provided config.
 func New(c Config) (Backend, error) {
-	db, err := store.NewBadgerStore(c.BadgerDBPath, c.BadgerMaxCacheSize)
+	db, err := store.NewBadgerStore(c.BadgerDBPath, c.BadgerMaxCacheSize, c.Logger)
 	if err != nil {
 		return nil, err
 	}
 	return &backend{
 		db:              db,
+		logger:          c.Logger,
 		topics:          map[string]store.TopicStore{},
 		activeConsumers: map[string]bool{},
 	}, nil
@@ -41,6 +44,7 @@ func New(c Config) (Backend, error) {
 
 type backend struct {
 	db              store.Store
+	logger          *logrus.Logger
 	mutex           sync.Mutex
 	topics          map[string]store.TopicStore
 	activeConsumers map[string]bool
@@ -54,8 +58,12 @@ func (b *backend) NewAsyncSink(ctx context.Context, req *proto.StartPublishReque
 	if err != nil {
 		return nil, err
 	}
+	b.logger.Debugf("New sink for topic %s created.", req.Topic)
+
 	return &badgerSink{
-		store: topicStore,
+		topic:  req.Topic,
+		store:  topicStore,
+		logger: b.logger,
 	}, nil
 }
 
@@ -83,12 +91,15 @@ func (b *backend) NewAsyncSource(ctx context.Context, req *proto.StartConsumeReq
 		return nil, err
 	}
 	b.activeConsumers[req.Consumer] = true
+	b.logger.Debugf("New consumer for topic %s with id %s.", req.Topic, req.Consumer)
 
 	return &badgerSource{
+		topic:         req.Topic,
 		consumerID:    req.Consumer,
 		initialOffset: offset,
 		backend:       b,
 		store:         topicStore,
+		logger:        b.logger,
 	}, nil
 }
 
