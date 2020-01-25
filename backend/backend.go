@@ -43,22 +43,22 @@ func New(c Config) (Backend, error) {
 }
 
 type backend struct {
-	db              store.Store
-	logger          *logrus.Logger
-	mutex           sync.Mutex
-	topics          map[string]store.TopicStore
+	db     store.Store
+	logger *logrus.Logger
+
+	topicsMutex sync.Mutex
+	topics      map[string]store.TopicStore
+
+	consumersMutex  sync.Mutex
 	activeConsumers map[string]bool
 }
 
 func (b *backend) NewAsyncSink(ctx context.Context, req *proto.StartPublishRequest) (substrate.AsyncMessageSink, error) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-
-	topicStore, err := b.topicStoreLocked(req.Topic)
+	topicStore, err := b.newTopicStore(req.Topic)
 	if err != nil {
 		return nil, err
 	}
-	b.logger.Debugf("New sink for topic %s created.", req.Topic)
+	b.logger.Debugf("New sink for topic '%s' created.", req.Topic)
 
 	return &badgerSink{
 		topic:  req.Topic,
@@ -68,17 +68,11 @@ func (b *backend) NewAsyncSink(ctx context.Context, req *proto.StartPublishReque
 }
 
 func (b *backend) NewAsyncSource(ctx context.Context, req *proto.StartConsumeRequest) (substrate.AsyncMessageSource, error) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-
 	if isNameInvalid(req.Consumer) {
 		return nil, errors.Errorf("invalid consumer name %s", req.Consumer)
 	}
-	if b.activeConsumers[req.Consumer] {
-		return nil, errors.Errorf("consumer with id %s is already active", req.Consumer)
-	}
 
-	topicStore, err := b.topicStoreLocked(req.Topic)
+	topicStore, err := b.newTopicStore(req.Topic)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +84,7 @@ func (b *backend) NewAsyncSource(ctx context.Context, req *proto.StartConsumeReq
 	if err != nil {
 		return nil, err
 	}
-	b.activeConsumers[req.Consumer] = true
-	b.logger.Debugf("New consumer for topic %s with id %s.", req.Topic, req.Consumer)
+	b.logger.Debugf("New consumer for topic '%s' with id '%s'.", req.Topic, req.Consumer)
 
 	return &badgerSource{
 		topic:         req.Topic,
@@ -107,14 +100,16 @@ func (b *backend) Close() error {
 	return b.db.Close()
 }
 
-// topicStoreLocked requires calling goroutine to hold the internal lock of this object.
-func (b *backend) topicStoreLocked(topicName string) (store.TopicStore, error) {
+func (b *backend) newTopicStore(topicName string) (topicStore store.TopicStore, err error) {
+	b.topicsMutex.Lock()
+	defer b.topicsMutex.Unlock()
+
 	if isNameInvalid(topicName) {
-		return nil, errors.Errorf("invalid topic name %s", topicName)
+		return nil, errors.Errorf("invalid topic name '%s'", topicName)
 	}
 	topicStore, ok := b.topics[topicName]
 	if !ok {
-		topicStore, err := b.db.TopicStore(topicName)
+		topicStore, err = b.db.TopicStore(topicName)
 		if err != nil {
 			return nil, err
 		}
@@ -124,14 +119,22 @@ func (b *backend) topicStoreLocked(topicName string) (store.TopicStore, error) {
 	return topicStore, nil
 }
 
-func (b *backend) closeConsumer(consumerID string) error {
-	b.mutex.Lock()
-	delete(b.activeConsumers, consumerID)
-	b.mutex.Unlock()
+func (b *backend) markConsumerAsActive(consumerID string) error {
+	b.consumersMutex.Lock()
+	defer b.consumersMutex.Unlock()
 
+	if b.activeConsumers[consumerID] {
+		return errors.Errorf("consumer with id %s is already active", consumerID)
+	}
 	return nil
 }
 
+func (b *backend) markConsumerAsInactive(consumerID string) {
+	b.consumersMutex.Lock()
+	delete(b.activeConsumers, consumerID)
+	b.consumersMutex.Unlock()
+}
+
 func isNameInvalid(name string) bool {
-	return !strings.Contains(name, ":")
+	return strings.Contains(name, ":")
 }

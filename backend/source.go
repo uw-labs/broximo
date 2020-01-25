@@ -19,7 +19,15 @@ type badgerSource struct {
 }
 
 func (source *badgerSource) ConsumeMessages(ctx context.Context, messages chan<- substrate.Message, acks <-chan substrate.Message) error {
+	if err := source.backend.markConsumerAsActive(source.consumerID); err != nil {
+		return err
+	}
 	rg, ctx := rungroup.New(ctx)
+	rg.Go(func() error {
+		<-ctx.Done()
+		source.backend.markConsumerAsInactive(source.consumerID)
+		return nil
+	})
 	rg.Go(func() error {
 		return source.writeMessages(ctx, messages)
 	})
@@ -39,9 +47,9 @@ func (source *badgerSource) writeMessages(ctx context.Context, messages chan<- s
 		select {
 		case <-ctx.Done():
 			return nil
-		case messages <- &seqMessage{data: msg}:
+		case messages <- &seqMessage{data: msg, seq: nextSeq}:
 			source.logger.Debugf(
-				"Message %v on topic %s was sent to consumer %s.",
+				"Message %v on topic '%s' was sent to consumer '%s'.",
 				nextSeq, source.topic, source.consumerID,
 			)
 			nextSeq++
@@ -70,7 +78,7 @@ func (source *badgerSource) processAcks(ctx context.Context, acks <-chan substra
 				return err
 			}
 			source.logger.Debugf(
-				"Message %v on topic %s was acknowledged by consumer %s.",
+				"Message %v on topic '%s' was acknowledged by consumer '%s'.",
 				expectedSeq, source.topic, source.consumerID,
 			)
 			expectedSeq++
@@ -79,7 +87,7 @@ func (source *badgerSource) processAcks(ctx context.Context, acks <-chan substra
 }
 
 func (source *badgerSource) Close() error {
-	return source.backend.closeConsumer(source.consumerID)
+	return nil
 }
 
 func (source *badgerSource) Status() (*substrate.Status, error) {

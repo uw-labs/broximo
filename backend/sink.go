@@ -25,9 +25,11 @@ func (sink *badgerSink) PublishMessages(ctx context.Context, acks chan<- substra
 		for {
 			select {
 			case <-ctx.Done():
+				return nil
 			case msg := <-toAck:
 				select {
 				case <-ctx.Done():
+					return nil
 				case acks <- msg:
 				}
 			}
@@ -43,7 +45,7 @@ func (sink *badgerSink) PublishMessages(ctx context.Context, acks chan<- substra
 					// TODO: handle tx retries
 					return err
 				}
-				sink.logger.Debugf("Message written to topic %s: %s", sink.topic, string(msg.Data()))
+				sink.logger.Debugf("Message written to topic '%s': %s", sink.topic, string(msg.Data()))
 
 				if dMsg, ok := msg.(substrate.DiscardableMessage); ok {
 					dMsg.DiscardPayload()
