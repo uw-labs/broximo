@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
@@ -44,8 +45,9 @@ type badgerStore struct {
 
 func (store *badgerStore) TopicStore(topicName string) (TopicStore, error) {
 	tStore := &badgerTopicStore{
-		db:    store.db,
-		topic: []byte(topicName + ":"),
+		db:         store.db,
+		topic:      []byte(topicName + ":"),
+		newMessage: sync.NewCond(&sync.Mutex{}),
 	}
 
 	if err := tStore.init(); err != nil {
